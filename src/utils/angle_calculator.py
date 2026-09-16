@@ -108,3 +108,67 @@ def squat_angles(landmarks):
         "left_ankle_angle": calculate_angle(pt(25), pt(27), pt(31)),
         "right_ankle_angle":calculate_angle(pt(26), pt(28), pt(32)),
     }
+
+
+def pushup_angles(landmarks):
+    """
+    Extract the key joint angles for a pushup from MediaPipe pose landmarks.
+    Returns a dict of angle names -> degrees.
+    MediaPipe landmark indices used:
+      11=left shoulder, 12=right shoulder
+      13=left elbow,    14=right elbow
+      15=left wrist,    16=right wrist
+      23=left hip,      24=right hip
+      25=left knee,     26=right knee
+      27=left ankle,    28=right ankle
+
+    Angles captured:
+      - elbow angle (shoulder-elbow-wrist): pushup depth, both sides
+      - hip angle (shoulder-hip-knee): plank/back alignment -- flags
+        hip sag (angle too high, hips dropped below the line) or piking
+        (angle too low, hips raised above the line)
+      - shoulder angle (elbow-shoulder-hip): hand placement / elbow flare
+        consistency relative to the torso
+    """
+    lm = landmarks
+
+    def pt(idx):
+        return landmark_to_point(lm[idx])
+
+    return {
+        "left_elbow_angle":    calculate_angle(pt(11), pt(13), pt(15)),
+        "right_elbow_angle":   calculate_angle(pt(12), pt(14), pt(16)),
+        "left_hip_angle":      calculate_angle(pt(11), pt(23), pt(25)),
+        "right_hip_angle":     calculate_angle(pt(12), pt(24), pt(26)),
+        "left_shoulder_angle": calculate_angle(pt(13), pt(11), pt(23)),
+        "right_shoulder_angle":calculate_angle(pt(14), pt(12), pt(24)),
+    }
+
+
+def leg_press_angles(landmarks):
+    """
+    Extract the key leg angles for a leg press from MediaPipe pose
+    landmarks. The person lies flat on their back, so only leg motion is
+    tracked -- there is no standing torso/trunk-lean context the way there
+    is for squat_angles(), and hip/knee/ankle angles mean something
+    different lying down than standing. This is deliberately a distinct
+    function from squat_angles(), not a reuse of it.
+
+    MediaPipe landmark indices used:
+      23=left hip,      24=right hip
+      25=left knee,     26=right knee
+      27=left ankle,    28=right ankle
+
+    Angle captured:
+      - knee angle (hip-knee-ankle): leg extension/retraction depth, the
+        primary signal for a leg press rep, both sides.
+    """
+    lm = landmarks
+
+    def pt(idx):
+        return landmark_to_point(lm[idx])
+
+    return {
+        "left_knee_angle":  calculate_angle(pt(23), pt(25), pt(27)),
+        "right_knee_angle": calculate_angle(pt(24), pt(26), pt(28)),
+    }

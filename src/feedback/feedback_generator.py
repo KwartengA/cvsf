@@ -35,31 +35,31 @@ def evaluate_squat_frame(angles: dict) -> list:
     if lk is not None and rk is not None:
         avg_knee = (lk + rk) / 2
         if avg_knee < THRESHOLDS["knee_min"]:
-            feedback.append((f"Knee: {avg_knee:.0f}° — good depth!", True))
+            feedback.append((f"Knee: {avg_knee:.0f}deg - good depth!", True))
         elif avg_knee <= THRESHOLDS["knee_max"]:
-            feedback.append((f"Knee: {avg_knee:.0f}° — parallel depth", True))
+            feedback.append((f"Knee: {avg_knee:.0f}deg - parallel depth", True))
         else:
-            feedback.append((f"Knee: {avg_knee:.0f}° — go deeper", False))
+            feedback.append((f"Knee: {avg_knee:.0f}deg - go deeper", False))
 
         symmetry = abs(lk - rk)
         if symmetry > 15:
-            feedback.append((f"Knee asymmetry: {symmetry:.0f}°", False))
+            feedback.append((f"Knee asymmetry: {symmetry:.0f}deg", False))
         else:
             feedback.append(("Knee symmetry: OK", True))
 
     if lh is not None and rh is not None:
         avg_hip = (lh + rh) / 2
         if avg_hip <= THRESHOLDS["hip_max"]:
-            feedback.append((f"Hip: {avg_hip:.0f}° — good hinge", True))
+            feedback.append((f"Hip: {avg_hip:.0f}deg - good hinge", True))
         else:
-            feedback.append((f"Hip: {avg_hip:.0f}° — hinge more", False))
+            feedback.append((f"Hip: {avg_hip:.0f}deg - hinge more", False))
 
     if la is not None and ra is not None:
         avg_ankle = (la + ra) / 2
         if avg_ankle >= THRESHOLDS["ankle_min"]:
             feedback.append(("Heels: planted", True))
         else:
-            feedback.append((f"Heels: rising ({avg_ankle:.0f}°)", False))
+            feedback.append((f"Heels: rising ({avg_ankle:.0f}deg)", False))
 
     return feedback
 
@@ -144,41 +144,41 @@ def evaluate_tennis_serve_frame(angles: dict) -> list:
 
     if re is not None:
         if SERVE_THRESHOLDS["elbow_trophy_min"] <= re <= SERVE_THRESHOLDS["elbow_trophy_max"]:
-            feedback.append((f"Elbow: {re:.0f}° — good bend", True))
+            feedback.append((f"Elbow: {re:.0f}deg - good bend", True))
         elif re < SERVE_THRESHOLDS["elbow_trophy_min"]:
-            feedback.append((f"Elbow: {re:.0f}° — too bent", False))
+            feedback.append((f"Elbow: {re:.0f}deg - too bent", False))
         else:
-            feedback.append((f"Elbow: {re:.0f}° — straighten less", False))
+            feedback.append((f"Elbow: {re:.0f}deg - straighten less", False))
 
     if rs is not None:
         if SERVE_THRESHOLDS["shoulder_abduct_min"] <= rs <= SERVE_THRESHOLDS["shoulder_abduct_max"]:
-            feedback.append((f"Shoulder: {rs:.0f}° — good lift", True))
+            feedback.append((f"Shoulder: {rs:.0f}deg - good lift", True))
         elif rs < SERVE_THRESHOLDS["shoulder_abduct_min"]:
-            feedback.append((f"Shoulder: {rs:.0f}° — lift arm higher", False))
+            feedback.append((f"Shoulder: {rs:.0f}deg - lift arm higher", False))
         else:
-            feedback.append((f"Shoulder: {rs:.0f}° — flying elbow", False))
+            feedback.append((f"Shoulder: {rs:.0f}deg - flying elbow", False))
 
     if rh is not None and lh is not None:
         avg_hip = (rh + lh) / 2
         if avg_hip <= SERVE_THRESHOLDS["hip_coil_max"]:
-            feedback.append((f"Hip coil: {avg_hip:.0f}° — good rotation", True))
+            feedback.append((f"Hip coil: {avg_hip:.0f}deg - good rotation", True))
         else:
-            feedback.append((f"Hip coil: {avg_hip:.0f}° — rotate hips more", False))
+            feedback.append((f"Hip coil: {avg_hip:.0f}deg - rotate hips more", False))
 
     if rk is not None and lk is not None:
         avg_knee = (rk + lk) / 2
         if SERVE_THRESHOLDS["knee_drive_min"] <= avg_knee <= SERVE_THRESHOLDS["knee_drive_max"]:
-            feedback.append((f"Legs: {avg_knee:.0f}° — good drive", True))
+            feedback.append((f"Legs: {avg_knee:.0f}deg - good drive", True))
         elif avg_knee < SERVE_THRESHOLDS["knee_drive_min"]:
-            feedback.append((f"Legs: {avg_knee:.0f}° — too deep", False))
+            feedback.append((f"Legs: {avg_knee:.0f}deg - too deep", False))
         else:
-            feedback.append((f"Legs: {avg_knee:.0f}° — bend knees more", False))
+            feedback.append((f"Legs: {avg_knee:.0f}deg - bend knees more", False))
 
     if tr is not None:
         if tr <= SERVE_THRESHOLDS["trunk_lean_min"]:
-            feedback.append((f"Trunk: {tr:.0f}° — good bow", True))
+            feedback.append((f"Trunk: {tr:.0f}deg - good bow", True))
         else:
-            feedback.append((f"Trunk: {tr:.0f}° — lean back more", False))
+            feedback.append((f"Trunk: {tr:.0f}deg - lean back more", False))
 
     return feedback
 
@@ -259,6 +259,242 @@ def print_session_report(summary: dict, video_name: str = ""):
     print(f"  Min hip angle   : {summary.get('min_hip_angle')}°")
     print(f"  Depth reached   : {'YES' if summary.get('depth_reached') else 'NO'}")
     print(f"  Parallel/below  : {'YES' if summary.get('parallel_or_below') else 'NO'}")
+
+    if summary.get("issues"):
+        print("\n  Issues detected:")
+        for issue in summary["issues"]:
+            print(f"    ! {issue}")
+    else:
+        print("\n  Form looks good!")
+    print(f"{'='*50}\n")
+
+
+# ── Pushup thresholds ─────────────────────────────────────────────────────
+# Based on biomechanics of a standard pushup:
+#   - Elbow angle at bottom: 70-100° is a good full-depth pushup
+#   - Hip angle: should stay close to a straight line (160-185°); too low
+#     means hips are sagging, too high (>185, i.e. reflex) means piking
+#   - Elbow left/right symmetry: uneven arm bend suggests an uneven push
+PUSHUP_THRESHOLDS = {
+    "elbow_min":  70,    # minimum elbow flexion for adequate depth
+    "elbow_max": 100,    # above this at the bottom = not deep enough
+    "hip_sag_min":  150, # below this = hips sagging (back not straight)
+    "hip_pike_max": 200, # above this = hips piking (raised too high)
+}
+# hip_sag_min was recalibrated from 160 to 150 after checking real pushup
+# footage: the 25th percentile hip angle across 5 real videos (4469 frames,
+# data/processed/pushup_keypoints.csv) was ~160deg even in clearly good-form
+# reps, meaning a strict 160 threshold flagged nearly every rep as sagging.
+# 150 leaves room for that real variation while still catching genuine sag
+# (a handful of near-zero-degree readings in the same data are landmark
+# tracking glitches, not real form -- no human pushup produces a ~0deg hip
+# angle -- so they were excluded from this calibration).
+
+
+def evaluate_pushup_frame(angles: dict) -> list:
+    """
+    Evaluate a single frame's pushup angles against thresholds.
+    Returns list of (message, is_ok) tuples for the visualizer panel.
+    """
+    feedback = []
+
+    le = angles.get("left_elbow_angle")
+    re = angles.get("right_elbow_angle")
+    lh = angles.get("left_hip_angle")
+    rh = angles.get("right_hip_angle")
+
+    if le is not None and re is not None:
+        avg_elbow = (le + re) / 2
+        if avg_elbow < PUSHUP_THRESHOLDS["elbow_min"]:
+            feedback.append((f"Elbow: {avg_elbow:.0f}deg - good depth!", True))
+        elif avg_elbow <= PUSHUP_THRESHOLDS["elbow_max"]:
+            feedback.append((f"Elbow: {avg_elbow:.0f}deg - good depth", True))
+        else:
+            feedback.append((f"Elbow: {avg_elbow:.0f}deg - go lower", False))
+
+        symmetry = abs(le - re)
+        if symmetry > 15:
+            feedback.append((f"Elbow asymmetry: {symmetry:.0f}deg", False))
+        else:
+            feedback.append(("Elbow symmetry: OK", True))
+
+    if lh is not None and rh is not None:
+        avg_hip = (lh + rh) / 2
+        if avg_hip < PUSHUP_THRESHOLDS["hip_sag_min"]:
+            feedback.append((f"Hips: {avg_hip:.0f}deg - sagging, engage core", False))
+        elif avg_hip > PUSHUP_THRESHOLDS["hip_pike_max"]:
+            feedback.append((f"Hips: {avg_hip:.0f}deg - piking, lower hips", False))
+        else:
+            feedback.append((f"Hips: {avg_hip:.0f}deg - straight line", True))
+
+    return feedback
+
+
+def evaluate_pushup_session(angle_rows: list) -> dict:
+    """
+    Evaluate all frames of a pushup session and return a session summary.
+    `angle_rows` is a list of dicts each containing pushup angle keys.
+    """
+    import numpy as np
+
+    elbow_angles = [
+        (r["left_elbow_angle"] + r["right_elbow_angle"]) / 2
+        for r in angle_rows
+        if "left_elbow_angle" in r and "right_elbow_angle" in r
+    ]
+    hip_angles = [
+        (r["left_hip_angle"] + r["right_hip_angle"]) / 2
+        for r in angle_rows
+        if "left_hip_angle" in r and "right_hip_angle" in r
+    ]
+
+    if not elbow_angles:
+        return {"error": "No valid frames found"}
+
+    min_elbow = min(elbow_angles)
+
+    summary = {
+        "total_frames":      len(angle_rows),
+        "min_elbow_angle":   round(min_elbow, 1),
+        "avg_elbow_angle":   round(float(np.mean(elbow_angles)), 1),
+        "avg_hip_angle":     round(float(np.mean(hip_angles)), 1) if hip_angles else None,
+        "depth_reached":     min_elbow <= PUSHUP_THRESHOLDS["elbow_max"],
+    }
+
+    issues = []
+    if not summary["depth_reached"]:
+        issues.append("Pushup depth insufficient — elbow angle never reached target range.")
+    if hip_angles:
+        min_hip = min(hip_angles)
+        max_hip = max(hip_angles)
+        if min_hip < PUSHUP_THRESHOLDS["hip_sag_min"]:
+            issues.append("Hips sagged during the set — engage the core to keep a straight line.")
+        if max_hip > PUSHUP_THRESHOLDS["hip_pike_max"]:
+            issues.append("Hips piked during the set — lower hips to keep a straight line.")
+
+    summary["issues"] = issues
+    summary["passed"] = len(issues) == 0
+    return summary
+
+
+def print_pushup_report(summary: dict, video_name: str = ""):
+    print(f"\n{'='*50}")
+    print(f"  PUSHUP REPORT  {video_name}")
+    print(f"{'='*50}")
+    print(f"  Frames analysed : {summary.get('total_frames')}")
+    print(f"  Min elbow angle : {summary.get('min_elbow_angle')}°")
+    print(f"  Avg elbow angle : {summary.get('avg_elbow_angle')}°")
+    print(f"  Avg hip angle   : {summary.get('avg_hip_angle')}°")
+    print(f"  Depth reached   : {'YES' if summary.get('depth_reached') else 'NO'}")
+
+    if summary.get("issues"):
+        print("\n  Issues detected:")
+        for issue in summary["issues"]:
+            print(f"    ! {issue}")
+    else:
+        print("\n  Form looks good!")
+    print(f"{'='*50}\n")
+
+
+# ── Leg press thresholds ───────────────────────────────────────────────────
+# CAVEAT: these are provisional, assumed biomechanics numbers, NOT yet
+# checked against real footage. Squats' knee-asymmetry threshold and
+# pushups' hip-sag threshold both turned out to need recalibration once
+# checked against real data (camera angle + landmark-geometry effects the
+# assumed numbers didn't account for) -- do the same percentile-based sanity
+# check here once real leg press footage exists, before trusting these.
+#
+# Based on general leg press guidelines:
+#   - Knee angle at the bottom (legs bent, sled closest to body): ~80-100deg
+#   - Knee angle at the top (legs extended, sled furthest away): ~160-175deg
+#     (not fully locked out, to keep tension on the muscle and avoid
+#     hyperextending the knee joint)
+LEG_PRESS_THRESHOLDS = {
+    "knee_min":  80,   # minimum knee flexion for adequate depth at the bottom
+    "knee_max": 100,   # above this at the bottom = not deep enough
+    "lockout_max": 175,  # above this at the top = knees locked out (risk of joint strain)
+}
+
+
+def evaluate_leg_press_frame(angles: dict) -> list:
+    """
+    Evaluate a single frame's leg press angles against thresholds.
+    Returns list of (message, is_ok) tuples for the visualizer panel.
+    """
+    feedback = []
+
+    lk = angles.get("left_knee_angle")
+    rk = angles.get("right_knee_angle")
+
+    if lk is not None and rk is not None:
+        avg_knee = (lk + rk) / 2
+        if avg_knee < LEG_PRESS_THRESHOLDS["knee_min"]:
+            feedback.append((f"Knee: {avg_knee:.0f}deg - good depth!", True))
+        elif avg_knee <= LEG_PRESS_THRESHOLDS["knee_max"]:
+            feedback.append((f"Knee: {avg_knee:.0f}deg - good depth", True))
+        elif avg_knee >= LEG_PRESS_THRESHOLDS["lockout_max"]:
+            feedback.append((f"Knee: {avg_knee:.0f}deg - avoid locking out", False))
+        else:
+            feedback.append((f"Knee: {avg_knee:.0f}deg - go deeper", False))
+
+        symmetry = abs(lk - rk)
+        if symmetry > 15:
+            feedback.append((f"Knee asymmetry: {symmetry:.0f}deg", False))
+        else:
+            feedback.append(("Knee symmetry: OK", True))
+
+    return feedback
+
+
+def evaluate_leg_press_session(angle_rows: list) -> dict:
+    """
+    Evaluate all frames of a leg press session and return a session summary.
+    `angle_rows` is a list of dicts each containing leg press angle keys.
+    """
+    import numpy as np
+
+    knee_angles = [
+        (r["left_knee_angle"] + r["right_knee_angle"]) / 2
+        for r in angle_rows
+        if "left_knee_angle" in r and "right_knee_angle" in r
+    ]
+
+    if not knee_angles:
+        return {"error": "No valid frames found"}
+
+    min_knee = min(knee_angles)
+    max_knee = max(knee_angles)
+
+    summary = {
+        "total_frames":    len(angle_rows),
+        "min_knee_angle":  round(min_knee, 1),
+        "max_knee_angle":  round(max_knee, 1),
+        "avg_knee_angle":  round(float(np.mean(knee_angles)), 1),
+        "depth_reached":   min_knee <= LEG_PRESS_THRESHOLDS["knee_max"],
+        "locked_out":      max_knee >= LEG_PRESS_THRESHOLDS["lockout_max"],
+    }
+
+    issues = []
+    if not summary["depth_reached"]:
+        issues.append("Leg press depth insufficient — knee angle never reached target range.")
+    if summary["locked_out"]:
+        issues.append("Knees locking out at full extension — keep a slight bend to protect the joint.")
+
+    summary["issues"] = issues
+    summary["passed"] = len(issues) == 0
+    return summary
+
+
+def print_leg_press_report(summary: dict, video_name: str = ""):
+    print(f"\n{'='*50}")
+    print(f"  LEG PRESS REPORT  {video_name}")
+    print(f"{'='*50}")
+    print(f"  Frames analysed : {summary.get('total_frames')}")
+    print(f"  Min knee angle  : {summary.get('min_knee_angle')}°")
+    print(f"  Max knee angle  : {summary.get('max_knee_angle')}°")
+    print(f"  Avg knee angle  : {summary.get('avg_knee_angle')}°")
+    print(f"  Depth reached   : {'YES' if summary.get('depth_reached') else 'NO'}")
+    print(f"  Locked out      : {'YES' if summary.get('locked_out') else 'NO'}")
 
     if summary.get("issues"):
         print("\n  Issues detected:")

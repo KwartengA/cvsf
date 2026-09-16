@@ -4,11 +4,17 @@ analyze_tennis_serve.py
 End-to-end tennis serve analysis script.
 
 Usage (from the project root with venv active):
-    python scripts/analyze_tennis_serve.py            # full run, saves video + CSV
-    python scripts/analyze_tennis_serve.py --no-save  # preview only, nothing written to disk
+    python scripts/analyze_tennis_serve.py               # full run, window + saves video + CSV
+    python scripts/analyze_tennis_serve.py --no-save      # preview only, nothing written to disk
+    python scripts/analyze_tennis_serve.py --no-display   # no window, but still saves annotated
+                                                           # video + CSV -- use this in a headless/
+                                                           # non-interactive shell (no display server):
+                                                           # cv2.imshow/waitKey misbehave there and
+                                                           # can cause frames to be silently skipped.
 
 Press  Q  while the video window is open to skip to the next video.
 """
+
 
 import sys
 import os
@@ -16,6 +22,7 @@ import cv2
 from pathlib import Path
 
 NO_SAVE = "--no-save" in sys.argv
+NO_DISPLAY = "--no-display" in sys.argv or NO_SAVE
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -32,7 +39,7 @@ from src.feedback.feedback_generator import (
 from src.analysis.dataset_creator import rows_to_dataframe, save_csv, summarize_dataset
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-CORRECT_DIR   = Path("data/raw/tennis/serve/corrrect")   # note triple-r in folder name
+CORRECT_DIR   = Path("data/raw/tennis/serve/correct")
 PROCESSED_DIR = Path("data/processed")
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -73,7 +80,8 @@ def analyze_video(video_path: Path, label: str = "correct") -> list:
     print(f"\n{'─'*55}")
     print(f"  Video : {video_path.name}")
     print(f"  Size  : {width}x{height}  FPS: {fps:.1f}  Frames: {info['frame_count']}")
-    print(f"  Press Q in the window to skip to next video.")
+    if not NO_DISPLAY:
+        print(f"  Press Q in the window to skip to next video.")
     print(f"{'─'*55}")
 
     all_rows      = []
@@ -113,9 +121,10 @@ def analyze_video(video_path: Path, label: str = "correct") -> list:
             if writer:
                 writer.write(frame)
 
-            cv2.imshow(f"Tennis Serve — {video_path.name}", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
+            if not NO_DISPLAY:
+                cv2.imshow(f"Tennis Serve — {video_path.name}", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
 
             frame_idx += 1
 

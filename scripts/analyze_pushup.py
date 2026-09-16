@@ -1,22 +1,22 @@
 """
-analyze_squat.py
-----------------
-End-to-end squat analysis script.
+analyze_pushup.py
+------------------
+End-to-end pushup analysis script.
 
 Usage (from the project root with venv active):
-    python scripts/analyze_squat.py               # full run, window + saves video + CSV
-    python scripts/analyze_squat.py --no-save      # no window, no annotated video -- just CSV
-    python scripts/analyze_squat.py --no-display   # no window, but still saves annotated
-                                                    # video + CSV -- use this in a headless/
-                                                    # non-interactive shell (no display server):
-                                                    # cv2.imshow/waitKey misbehave there and can
-                                                    # cause frames to be silently skipped.
+    python scripts/analyze_pushup.py               # full run, window + saves video + CSV
+    python scripts/analyze_pushup.py --no-save      # no window, no annotated video -- just CSV
+    python scripts/analyze_pushup.py --no-display   # no window, but still saves annotated
+                                                     # video + CSV -- use this in a headless/
+                                                     # non-interactive shell (no display server):
+                                                     # cv2.imshow/waitKey misbehave there and can
+                                                     # cause frames to be silently skipped.
 
 What it does:
-  1. Processes both squat videos in data/raw/gym/squat/correct/
+  1. Processes all pushup videos in data/raw/gym/pushup/correct/
   2. Displays each video with skeleton overlay + live joint angles + feedback panel
   3. Saves annotated video to data/processed/
-  4. Exports a keypoint CSV to data/processed/squat_keypoints.csv
+  4. Exports a keypoint CSV to data/processed/pushup_keypoints.csv
   5. Prints a per-video form report to the terminal
 
 Press  Q  while the video window is open to skip to the next video.
@@ -36,20 +36,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.utils.video_utils import open_video, video_info
 from src.pose_estimation.extractor import PoseExtractor
 from src.pose_estimation.visualizer import (
-    draw_pose, draw_squat_angles, draw_feedback_panel, draw_frame_info
+    draw_pose, draw_pushup_angles, draw_feedback_panel, draw_frame_info
 )
-from src.utils.angle_calculator import squat_angles
+from src.utils.angle_calculator import pushup_angles
 from src.feedback.feedback_generator import (
-    evaluate_squat_frame, evaluate_squat_session, print_session_report
+    evaluate_pushup_frame, evaluate_pushup_session, print_pushup_report
 )
 from src.analysis.dataset_creator import rows_to_dataframe, save_csv, summarize_dataset
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-CORRECT_DIR   = Path("data/raw/gym/squat/correct")
+CORRECT_DIR   = Path("data/raw/gym/pushup/correct")
 PROCESSED_DIR = Path("data/processed")
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
-OUTPUT_CSV = PROCESSED_DIR / "squat_keypoints.csv"
+OUTPUT_CSV = PROCESSED_DIR / "pushup_keypoints.csv"
 
 
 def analyze_video(video_path: Path, label: str = "correct") -> list:
@@ -94,17 +94,17 @@ def analyze_video(video_path: Path, label: str = "correct") -> list:
                 draw_pose(frame, results)
 
                 # Calculate and draw joint angles
-                angles = squat_angles(landmarks)
-                draw_squat_angles(frame, landmarks, angles)
+                angles = pushup_angles(landmarks)
+                draw_pushup_angles(frame, landmarks, angles)
 
                 # Per-frame feedback panel
-                feedback = evaluate_squat_frame(angles)
+                feedback = evaluate_pushup_frame(angles)
                 draw_feedback_panel(frame, feedback)
 
                 # Collect data for CSV
                 row = extractor.landmarks_to_dict(landmarks, frame_idx=frame_idx, label=label)
                 row["video"] = video_path.name
-                row["sport"] = "squat"
+                row["sport"] = "pushup"
                 row.update(angles)
                 all_rows.append(row)
                 angle_history.append(angles)
@@ -119,7 +119,7 @@ def analyze_video(video_path: Path, label: str = "correct") -> list:
                 writer.write(frame)
 
             if not NO_DISPLAY:
-                cv2.imshow(f"Squat Analysis — {video_path.name}", frame)
+                cv2.imshow(f"Pushup Analysis — {video_path.name}", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 
@@ -133,14 +133,17 @@ def analyze_video(video_path: Path, label: str = "correct") -> list:
 
     # Session-level report
     if angle_history:
-        summary = evaluate_squat_session(angle_history)
-        print_session_report(summary, video_path.name)
+        summary = evaluate_pushup_session(angle_history)
+        print_pushup_report(summary, video_path.name)
 
     return all_rows
 
 
 def main():
-    video_files = sorted(CORRECT_DIR.glob("*.mp4")) + sorted(CORRECT_DIR.glob("*.MP4"))
+    video_files = (
+        sorted(CORRECT_DIR.glob("*.mp4")) + sorted(CORRECT_DIR.glob("*.MP4")) +
+        sorted(CORRECT_DIR.glob("*.mov")) + sorted(CORRECT_DIR.glob("*.MOV"))
+    )
 
     if not video_files:
         print(f"No videos found in {CORRECT_DIR}")
