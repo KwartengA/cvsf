@@ -59,6 +59,7 @@ from src.utils.angle_calculator import squat_angles, pushup_angles
 from src.feedback.feedback_generator import (
     evaluate_squat_frame, evaluate_pushup_frame, THRESHOLDS, PUSHUP_THRESHOLDS,
 )
+from src.streaming.mjpeg_server import MjpegServer
 
 MODELS_DIR = Path("models")
 
@@ -191,21 +192,12 @@ def score_rep(model, feature_columns, asymmetry_keys, asymmetry_feature, angles:
     return pred
 
 
-def post_result(api_url, user_id, sport, form_score,
-                 errors_detected, reps, duration_sec, feature_importances):
-    payload = {
-        "userId": user_id,
-        "sport": sport,
-        "formScore": form_score,
-        "errorsDetected": errors_detected,
-        "reps": reps,
-        "durationSec": round(duration_sec),
-        "featureImportances": feature_importances,
-    }
+def _send(api_url, method, payload):
+    """POST/PATCH payload to api_url, returning the parsed JSON response or None on failure."""
     if not api_url:
-        print("\n[no --api-url given, printing result instead of POSTing]")
+        print(f"\n[no --api-url given, printing {method} instead of sending]")
         print(json.dumps(payload, indent=2))
-        return
+        return None
 
     try:
         import urllib.request
@@ -213,14 +205,53 @@ def post_result(api_url, user_id, sport, form_score,
             api_url,
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
-            method="POST",
+            method=method,
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
-            print(f"\nPOSTed result -> {api_url} (status {resp.status})")
+            body = json.loads(resp.read().decode("utf-8"))
+            print(f"\n{method}ed -> {api_url} (status {resp.status})")
+            return body
     except Exception as e:
-        print(f"\nFailed to POST result to {api_url}: {e}")
-        print("Result payload (not sent):")
+        print(f"\nFailed to {method} to {api_url}: {e}")
+        print("Payload (not sent):")
         print(json.dumps(payload, indent=2))
+        return None
+
+
+def start_session(api_url, user_id, sport):
+    """POST a new live session at the start of a run so reps can be PATCHed onto it."""
+    payload = {"userId": user_id, "sport": sport, "status": "live"}
+    result = _send(api_url, "POST", payload)
+    return result["id"] if result else None
+
+
+def patch_rep(api_url, session_id, rep_index, rep_score, form_score,
+              errors_detected, rep_count, duration_sec, feature_importances):
+    """PATCH the live session after a single rep completes."""
+    if not session_id:
+        return
+    payload = {
+        "formScore": form_score,
+        "repCount": rep_count,
+        "durationSec": round(duration_sec),
+        "errorsDetected": errors_detected,
+        "featureImportances": feature_importances,
+        "newRep": {"repIndex": rep_index, "score": rep_score},
+    }
+    _send(f"{api_url}/{session_id}", "PATCH", payload)
+
+
+def finish_session(api_url, session_id, form_score, reps, duration_sec):
+    """PATCH the session to mark it complete once the run ends."""
+    if not session_id:
+        return
+    payload = {
+        "status": "complete",
+        "formScore": form_score,
+        "repCount": reps,
+        "durationSec": round(duration_sec),
+    }
+    _send(f"{api_url}/{session_id}", "PATCH", payload)
 
 
 def main():
@@ -238,6 +269,10 @@ def main():
                               "result instead of sending it.")
     parser.add_argument("--user-id", default=os.environ.get("CVSF_USER_ID"),
                          help="User UUID to attribute the workout to (or CVSF_USER_ID env var)")
+    parser.add_argument("--stream-port", type=int, default=None,
+                         help="Serve the annotated feed as MJPEG at "
+                              "http://<pi-ip>:<port>/stream.mjpg (e.g. 5001). "
+                              "Omit to disable streaming.")
     args = parser.parse_args()
 
     config = ACTIVITY_CONFIG[args.activity]
@@ -267,6 +302,14 @@ def main():
     rep_results = []  # list of "correct"/"incorrect" per completed rep
     errors_seen = set()
     importance_totals = {}  # website feature key -> summed deviation across all reps
+
+    session_id = start_session(args.api_url, args.user_id, args.activity)
+
+    stream_server = None
+    if args.stream_port:
+        stream_server = MjpegServer(port=args.stream_port)
+        stream_server.start()
+        print(f"Streaming annotated feed at http://0.0.0.0:{args.stream_port}/stream.mjpg")
 
     print(f"\nStarting live {args.activity} session on source={args.source} "
           f"(fps~{fps:.1f}). Press Q to stop." if not args.no_display else
@@ -299,14 +342,30 @@ def main():
                         completed_rep_angles,
                     )
                     rep_results.append(pred)
-                    print(f"  Rep {detector.rep_count}: {pred}")
+                    print(f"\n  Rep {detector.rep_count}: {pred}")
 
                     for feature_key, score in deviation_importances(
                         config["deviation_specs"], completed_rep_angles
                     ).items():
                         importance_totals[feature_key] = importance_totals.get(feature_key, 0.0) + score
 
-                if not args.no_display:
+                    rep_score = 100 if pred == "correct" else 40
+                    running_form_score = round(
+                        100 * sum(1 for r in rep_results if r == "correct") / len(rep_results)
+                    )
+                    patch_rep(
+                        args.api_url, session_id,
+                        rep_index=detector.rep_count - 1,
+                        rep_score=rep_score,
+                        form_score=running_form_score,
+                        errors_detected=sorted(errors_seen),
+                        rep_count=len(rep_results),
+                        duration_sec=time.time() - start_time,
+                        feature_importances=importance_totals,
+                    )
+
+                need_overlay = not args.no_display or stream_server is not None
+                if need_overlay:
                     draw_pose(frame, results)
                     config["draw_fn"](frame, landmarks, angles)
                     feedback = config["feedback_fn"](angles)
@@ -315,13 +374,26 @@ def main():
                         if not ok:
                             errors_seen.add(msg)
 
-            if not args.no_display:
+            if not args.no_display or stream_server is not None:
                 draw_frame_info(frame, frame_idx, fps)
                 cv2.putText(frame, f"Reps: {detector.rep_count}", (10, 70),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+
+            if stream_server is not None:
+                stream_server.update_frame(frame)
+
+            if not args.no_display:
                 cv2.imshow(f"CVSF Live — {args.activity}", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
+
+            running_fps = (frame_idx + 1) / elapsed if elapsed > 0 else 0.0
+            pose_status = "YES" if landmarks else "no "
+            sys.stdout.write(
+                f"\r  frame {frame_idx:>6}  |  {running_fps:5.1f} fps  |  "
+                f"pose: {pose_status}  |  reps: {detector.rep_count}   "
+            )
+            sys.stdout.flush()
 
             frame_idx += 1
 
@@ -337,15 +409,12 @@ def main():
     print(f"\nSession complete: {n_reps} reps, form_score={form_score}, "
           f"duration={duration_sec:.1f}s")
 
-    post_result(
+    finish_session(
         api_url=args.api_url,
-        user_id=args.user_id,
-        sport=args.activity,
+        session_id=session_id,
         form_score=form_score,
-        errors_detected=sorted(errors_seen),
         reps=n_reps,
         duration_sec=duration_sec,
-        feature_importances=importance_totals,
     )
 
 
