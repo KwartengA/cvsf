@@ -156,6 +156,13 @@ data/processed/**/*.pkl
 data/processed/**/*.pickle
 data/processed/**/*.h5
 data/processed/**/*.hdf5
+data/processed/**/*.mp4
+data/processed/**/*.avi
+data/processed/**/*.mov
+data/processed/**/*.mkv
+data/processed/**/*.flv
+data/processed/**/*.wmv
+data/processed/**/*.webm
 
 
 !data/raw/.gitkeep
