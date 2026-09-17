@@ -16,10 +16,13 @@ Usage:
         --source data/raw/gym/squat/correct/squat_correct_01.mp4
 
     # on the Pi, live camera, headless (no display), pointed at the server
-    python scripts/pi_live_inference.py --activity squat \\
+    # NOTE: the CSI camera (e.g. Camera Module 3) needs the libcamerify
+    # wrapper -- cv2.VideoCapture(0) opens fine without it but silently
+    # reads 0 frames forever, so it MUST be run as:
+    libcamerify python scripts/pi_live_inference.py --activity squat \\
         --source 0 --no-display \\
         --api-url http://192.168.1.50:3000/api/sessions \\
-        --user-id <uuid>
+        --user-id <uuid> --stream-port 5001
 
 Press Q to end the session early (ignored with --no-display; use Ctrl+C
 instead, or pass --max-seconds to auto-stop).
@@ -263,6 +266,8 @@ def main():
                          help="Don't open a preview window (for headless Pi use)")
     parser.add_argument("--max-seconds", type=float, default=None,
                          help="Auto-stop the session after this many seconds")
+    parser.add_argument("--max-reps", type=int, default=None,
+                         help="Auto-stop the session after this many completed reps")
     parser.add_argument("--api-url", default=os.environ.get("CVSF_API_URL"),
                          help="POST endpoint, e.g. http://<server>:3000/api/sessions "
                               "(or set CVSF_API_URL env var). If omitted, prints the "
@@ -294,7 +299,16 @@ def main():
         print(f"ERROR: could not open source {args.source}")
         sys.exit(1)
 
+    # Lower capture resolution -- MediaPipe inference cost and MJPEG bandwidth
+    # both scale with frame size, so a smaller capture keeps fps up and the
+    # stream smooth over wifi rather than fighting a needlessly large frame.
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 480)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
+
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    print(f"Capture resolution: {actual_w}x{actual_h}")
 
     detector = StreamingRepDetector(config["standing_angle"], config["min_dip_deg"])
     left_key, right_key = config["depth_keys"]
@@ -317,12 +331,32 @@ def main():
 
     start_time = time.time()
     frame_idx = 0
+    consecutive_read_failures = 0
+    # CSI cameras via libcamerify take a few frames to start streaming after
+    # VideoCapture opens, so tolerate a warm-up window of failed reads rather
+    # than bailing on the very first one; a real end-of-stream (video file
+    # EOF, camera unplugged) will keep failing past this threshold.
+    MAX_CONSECUTIVE_READ_FAILURES = 60
+
+    # Require a sustained run of detected pose landmarks before counting reps
+    # -- MediaPipe occasionally reports a landmark set for an isolated frame
+    # even when nobody is actually in view yet, and those isolated readings
+    # are noisy enough to look like a rep to the dip/rise detector. Waiting
+    # for a stable run filters that out and lets the person get set before
+    # anything starts counting.
+    POSE_WARMUP_FRAMES = 20
+    stable_pose_frames = 0
 
     with PoseExtractor() as extractor:
         while True:
             ret, frame = cap.read()
             if not ret:
-                break
+                consecutive_read_failures += 1
+                if consecutive_read_failures > MAX_CONSECUTIVE_READ_FAILURES:
+                    break
+                time.sleep(0.05)
+                continue
+            consecutive_read_failures = 0
 
             elapsed = time.time() - start_time
             if args.max_seconds and elapsed >= args.max_seconds:
@@ -330,39 +364,46 @@ def main():
 
             results, landmarks = extractor.extract_frame(frame, frame_idx=frame_idx, fps=fps)
 
+            reached_max_reps = False
+
             if landmarks:
+                stable_pose_frames += 1
                 angles = config["angles_fn"](landmarks)
                 depth_angle = (angles[left_key] + angles[right_key]) / 2
 
-                completed_rep_angles = detector.update(depth_angle, angles)
-                if completed_rep_angles is not None:
-                    pred = score_rep(
-                        model, config["feature_columns"],
-                        config["asymmetry_keys"], config["asymmetry_feature"],
-                        completed_rep_angles,
-                    )
-                    rep_results.append(pred)
-                    print(f"\n  Rep {detector.rep_count}: {pred}")
+                if stable_pose_frames >= POSE_WARMUP_FRAMES:
+                    completed_rep_angles = detector.update(depth_angle, angles)
+                    if completed_rep_angles is not None:
+                        pred = score_rep(
+                            model, config["feature_columns"],
+                            config["asymmetry_keys"], config["asymmetry_feature"],
+                            completed_rep_angles,
+                        )
+                        rep_results.append(pred)
+                        print(f"\n  Rep {detector.rep_count}: {pred}")
 
-                    for feature_key, score in deviation_importances(
-                        config["deviation_specs"], completed_rep_angles
-                    ).items():
-                        importance_totals[feature_key] = importance_totals.get(feature_key, 0.0) + score
+                        for feature_key, score in deviation_importances(
+                            config["deviation_specs"], completed_rep_angles
+                        ).items():
+                            importance_totals[feature_key] = importance_totals.get(feature_key, 0.0) + score
 
-                    rep_score = 100 if pred == "correct" else 40
-                    running_form_score = round(
-                        100 * sum(1 for r in rep_results if r == "correct") / len(rep_results)
-                    )
-                    patch_rep(
-                        args.api_url, session_id,
-                        rep_index=detector.rep_count - 1,
-                        rep_score=rep_score,
-                        form_score=running_form_score,
-                        errors_detected=sorted(errors_seen),
-                        rep_count=len(rep_results),
-                        duration_sec=time.time() - start_time,
-                        feature_importances=importance_totals,
-                    )
+                        rep_score = 100 if pred == "correct" else 40
+                        running_form_score = round(
+                            100 * sum(1 for r in rep_results if r == "correct") / len(rep_results)
+                        )
+                        patch_rep(
+                            args.api_url, session_id,
+                            rep_index=detector.rep_count - 1,
+                            rep_score=rep_score,
+                            form_score=running_form_score,
+                            errors_detected=sorted(errors_seen),
+                            rep_count=len(rep_results),
+                            duration_sec=time.time() - start_time,
+                            feature_importances=importance_totals,
+                        )
+
+                        if args.max_reps and detector.rep_count >= args.max_reps:
+                            reached_max_reps = True
 
                 need_overlay = not args.no_display or stream_server is not None
                 if need_overlay:
@@ -373,14 +414,25 @@ def main():
                     for msg, ok in feedback:
                         if not ok:
                             errors_seen.add(msg)
+            else:
+                stable_pose_frames = 0
 
             if not args.no_display or stream_server is not None:
                 draw_frame_info(frame, frame_idx, fps)
-                cv2.putText(frame, f"Reps: {detector.rep_count}", (10, 70),
+                status = (
+                    f"Reps: {detector.rep_count}"
+                    if stable_pose_frames >= POSE_WARMUP_FRAMES
+                    else "Reading pose..."
+                )
+                cv2.putText(frame, status, (10, 70),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
 
             if stream_server is not None:
                 stream_server.update_frame(frame)
+
+            if reached_max_reps:
+                print(f"\nReached {args.max_reps} reps -- stopping session.")
+                break
 
             if not args.no_display:
                 cv2.imshow(f"CVSF Live — {args.activity}", frame)
